@@ -11,8 +11,8 @@ import (
 )
 
 func main() {
-	// Токен бота (в продакшене используйте переменные окружения)
-	token := "7547569544:AAFqeTgsuPS6XhN7J4JIsUs908YIAU5ppYs"
+	// Токен бота (в продакшене рекомендуется использовать переменные окружения)
+	token := "7547569544:AAESC3ecIyRx4ysVUmy5YiLkfaUpHmqJYoM"
 
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
@@ -43,7 +43,7 @@ func main() {
 			continue
 		}
 
-		// Если сообщение начинается со слэша, удаляем его и, если присутствует, упоминание бота
+		// Если сообщение начинается со слэша, удаляем его и, если присутствует, упоминание бота.
 		if strings.HasPrefix(update.Message.Text, "/") {
 			cmd := strings.TrimPrefix(update.Message.Text, "/")
 			if i := strings.Index(cmd, "@"); i != -1 {
@@ -59,9 +59,11 @@ func main() {
 				lowerCmd == "полный список анкет" ||
 				strings.HasPrefix(lowerCmd, "анкета ") ||
 				strings.HasPrefix(lowerCmd, "датьадмин") ||
-				strings.HasPrefix(lowerCmd, "чек лог") {
+				strings.HasPrefix(lowerCmd, "чек лог") ||
+				strings.HasPrefix(lowerCmd, "начатьивент") {
 				handlers.HandleAdminCommand(bot, update.Message)
 			} else {
+				// Обработка обычных команд
 				handlers.HandleCommand(bot, update.Message)
 			}
 		} else {

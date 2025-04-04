@@ -181,9 +181,18 @@ func HandleAdminCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "У вас нет прав для выполнения этой команды."))
 		return
 	}
+
+	// Получаем команду и приводим её к нижнему регистру.
 	cmd := strings.TrimSpace(message.Text)
 	lowerCmd := strings.ToLower(cmd)
+	// Нормализуем команду, удаляя все пробелы — это позволит распознать и
+	// команды вида "начать ивент" так же, как "начатьивент"
+	normalizedCmd := strings.ReplaceAll(lowerCmd, " ", "")
+
 	switch {
+	case strings.HasPrefix(normalizedCmd, "начатьивент"):
+		// Вызываем обработчик создания ивента.
+		HandleCreateEvent(bot, message)
 	case strings.EqualFold(lowerCmd, "живой"):
 		resetRegistrationSessions()
 		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "сэр, да, сэр!"))

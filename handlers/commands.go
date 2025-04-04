@@ -355,6 +355,53 @@ func handleDeleteProfile(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	bot.Send(msg)
 }
 
+// HandleCreateEvent обрабатывает команду создания ивента от администратора.
+// Формат команды:
+//
+//	начатьивент Название ивента, число для обломков, число для пиастр
+func HandleCreateEvent(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
+	// Удаляем префикс и обрезаем пробелы
+	argsStr := strings.TrimSpace(strings.TrimPrefix(message.Text, "начатьивент"))
+	parts := strings.Split(argsStr, ",")
+	if len(parts) < 3 {
+		msg := tgbotapi.NewMessage(message.Chat.ID, "Неверный формат команды.\nИспользуйте: начатьивент (Имя ивента), (число для обломков), (число для пиастр)")
+		bot.Send(msg)
+		return
+	}
+
+	eventName := strings.TrimSpace(parts[0])
+	oblomki, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Ошибка: число для обломков указано неверно."))
+		return
+	}
+	piastry, err := strconv.Atoi(strings.TrimSpace(parts[2]))
+	if err != nil {
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Ошибка: число для пиастр указано неверно."))
+		return
+	}
+
+	// Создаём объект активного ивента
+	currentEvent = &EventDetails{
+		Name:      eventName,
+		Oblomki:   oblomki,
+		Piastry:   piastry,
+		StartDate: time.Now(),
+	}
+
+	eventMessage := fmt.Sprintf("Ивент %s Запущен!\nУчастникам, принявшим ивент, будет зачислено:\nОбломков: %d\nПиастр: %d\nДата начала: %s",
+		currentEvent.Name, currentEvent.Oblomki, currentEvent.Piastry, currentEvent.StartDate.Format("02.01.2006 15:04"))
+
+	// Создаём инлайн-клавиатуру с двумя кнопками.
+	participateButton := tgbotapi.NewInlineKeyboardButtonData("Участвую", "event:participate")
+	skipButton := tgbotapi.NewInlineKeyboardButtonData("Пропуск", "event:skip")
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(participateButton, skipButton))
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, eventMessage)
+	msg.ReplyMarkup = keyboard
+	bot.Send(msg)
+}
+
 // HandleCallbackQuery обрабатывает callback-запросы (например, для статистики и подтверждения удаления анкеты).
 func HandleCallbackQuery(bot *tgbotapi.BotAPI, cq *tgbotapi.CallbackQuery) {
 	// Отвечаем на callback-запрос, чтобы кнопки перестали мигать.
