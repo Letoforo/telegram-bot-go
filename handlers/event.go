@@ -80,19 +80,21 @@ func HandleCreateEvent(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 func HandleEventCallback(bot *tgbotapi.BotAPI, cq *tgbotapi.CallbackQuery) {
 	// Отправляем ответ на callback-запрос, чтобы кнопка перестала мигать.
 	ack := tgbotapi.NewCallback(cq.ID, "")
-	bot.Request(ack)
+	_, _ = bot.Request(ack)
 
-	// Проверяем, что база данных (DB) инициализирована.
+	// Проверяем, что глобальная переменная DB инициализирована.
 	if DB == nil {
 		answer := tgbotapi.NewCallback(cq.ID, "Ошибка сервера: база данных не инициализирована.")
-		bot.Request(answer)
+		_, _ = bot.Request(answer)
+		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Ошибка сервера: база данных не инициализирована."))
 		return
 	}
 
 	// Проверяем, что активный ивент установлен.
 	if currentEvent == nil {
 		answer := tgbotapi.NewCallback(cq.ID, "Нет активного ивента.")
-		bot.Request(answer)
+		_, _ = bot.Request(answer)
+		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Нет активного ивента."))
 		return
 	}
 
@@ -106,11 +108,11 @@ func HandleEventCallback(bot *tgbotapi.BotAPI, cq *tgbotapi.CallbackQuery) {
 		err := usersColl.FindOne(ctx, bson.M{"telegram_id": int64(cq.From.ID)}).Decode(&user)
 		if err != nil {
 			answer := tgbotapi.NewCallback(cq.ID, "Профиль не найден. Зарегистрируйтесь, пожалуйста.")
-			bot.Request(answer)
+			_, _ = bot.Request(answer)
+			bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Профиль не найден. Зарегистрируйтесь, пожалуйста."))
 			return
 		}
 
-		// Начисляем валюту, указанную в ивенте.
 		newPiastry := user.Piastry + currentEvent.Piastry
 		newOblomki := user.Oblomki + currentEvent.Oblomki
 
@@ -124,17 +126,23 @@ func HandleEventCallback(bot *tgbotapi.BotAPI, cq *tgbotapi.CallbackQuery) {
 		_, err = usersColl.UpdateOne(ctx, bson.M{"telegram_id": int64(cq.From.ID)}, update)
 		if err != nil {
 			answer := tgbotapi.NewCallback(cq.ID, "Ошибка обновления профиля.")
-			bot.Request(answer)
+			_, _ = bot.Request(answer)
+			bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Ошибка обновления профиля."))
 			return
 		}
 
 		answer := tgbotapi.NewCallback(cq.ID, "Успешно! Валюта зачислена в ваш профиль.")
-		bot.Request(answer)
+		_, _ = bot.Request(answer)
+		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Успешно! Валюта зачислена в ваш профиль."))
+
 	case "event:skip":
 		answer := tgbotapi.NewCallback(cq.ID, "Вы отказались от участия в ивенте.")
-		bot.Request(answer)
+		_, _ = bot.Request(answer)
+		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Вы отказались от участия в ивенте."))
+
 	default:
 		answer := tgbotapi.NewCallback(cq.ID, "Неверный выбор.")
-		bot.Request(answer)
+		_, _ = bot.Request(answer)
+		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Неверный выбор."))
 	}
 }
