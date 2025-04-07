@@ -102,10 +102,10 @@ func HandleCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 				handleAdd(bot, message, parts[1], parts[2])
 			case "потерять":
 				if len(parts) < 2 {
-					bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Неверный формат команды."))
+					bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Неверный формат. Например: потерять обломки 5"))
 					return
 				}
-				handleShow(bot, message, parts[1])
+				handleShow(bot, message, parts[1], parts[2])
 			case "передать":
 				// Формат: передать (обломки или пиастры) (@username) (количество)
 				if len(parts) < 4 {
@@ -226,29 +226,48 @@ func handleAdd(bot *tgbotapi.BotAPI, message *tgbotapi.Message, field, valueStr 
 }
 
 // handleShow выводит текущее значение ресурса.
-func handleShow(bot *tgbotapi.BotAPI, message *tgbotapi.Message, field string) {
-	lField := strings.ToLower(field)
-	if lField != "обломки" && lField != "пиастры" {
+func handleShow(bot *tgbotapi.BotAPI, message *tgbotapi.Message, field, valueStr string) {
+	// Преобразуем строку в число
+	num, err := strconv.Atoi(strings.TrimSpace(valueStr))
+	if err != nil {
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Неверное значение количества."))
+		return
+	}
+
+	// Определяем поле в базе данных
+	var dbField string
+	switch strings.ToLower(field) {
+	case "обломки":
+		dbField = "oblomki"
+	case "пиастры":
+		dbField = "piastry"
+	default:
 		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Неверное поле. Используйте 'обломки' или 'пиастры'."))
 		return
 	}
+
+	// Контекст с таймаутом для выполнения запроса
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Поиск пользователя по telegram_id и операция вычитания (увеличиваем значение на -num)
 	filter := bson.M{"telegram_id": message.From.ID}
-	var profile models.UserProfile
-	err := userCollection.FindOne(ctx, filter).Decode(&profile)
+	update := bson.M{"$inc": bson.M{dbField: -num}}
+	_, err = userCollection.UpdateOne(ctx, filter, update)
 	if err != nil {
-		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Анкета не найдена."))
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Ошибка при обновлении профиля."))
 		return
 	}
-	var currentValue int
-	if lField == "обломки" {
-		currentValue = profile.Oblomki
-	} else {
-		currentValue = profile.Piastry
-	}
-	reply := fmt.Sprintf("Текущее значение %s: %d", field, currentValue)
+
+	// Сообщение об успехе
+	reply := fmt.Sprintf("Вычтено %d из %s.", num, field)
 	bot.Send(tgbotapi.NewMessage(message.Chat.ID, reply))
+
+	// Запись лога операции (записываем отрицательное значение)
+	var currentUser models.UserProfile
+	if err := userCollection.FindOne(ctx, filter).Decode(&currentUser); err == nil {
+		AddLogEvent(currentUser, -num, field)
+	}
 }
 
 // handleTransfer осуществляет передачу ресурса от отправителя к получателю.
@@ -336,14 +355,14 @@ func handleStatistic(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 
 // handleHelp выводит список команд для пользователя.
 func handleHelp(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
-	helpText := "Команды для обычных пользователей:\n" +
+	helpText := "Команды для обычных пользователей:\n \n" +
 		"• регистрация – начать регистрацию анкеты\n" +
 		"• анкета – показать свою анкету\n" +
 		"• где ром – сбросить незавершённую регистрацию\n" +
 		"• статистика – показать статистику участников\n" +
 		"• изменить [поле] [значение] – изменить указанное поле анкеты\n" +
 		"• добавить [обломки/пиастры] [количество] – пополнить ресурс\n" +
-		"• потерять [обломки/пиастры] – увидеть текущее значение ресурса\n" +
+		"• потерять [обломки/пиастры] – удалить текущее значение ресурса\n" +
 		"• передать [обломки/пиастры] (@username) [количество] – передать ресурс другому участнику\n" +
 		"• удалить анкету – удалить свою анкету (требуется подтверждение)\n\n" +
 		"Команды для администрации:\n" +
@@ -352,7 +371,8 @@ func handleHelp(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		"• анкета (айди анкеты) – вывести анкету по заданному ID\n" +
 		"• датьадмин @username – назначить пользователя администратором\n" +
 		"• живой – сбросить все активные сеансы регистрации\n" +
-		"• чек лог [день/неделя/месяц] – вывести лог изменений ресурсов\n"
+		"• чек лог [день/неделя/месяц] – вывести лог изменений ресурсов\n" +
+		"• начатьивент (имя), (число обломков), (число пиастр) – начать ивент по добавлению валюты\n"
 	bot.Send(tgbotapi.NewMessage(message.Chat.ID, helpText))
 }
 
@@ -408,15 +428,15 @@ func HandleCallbackQuery(bot *tgbotapi.BotAPI, cq *tgbotapi.CallbackQuery) {
 	switch cq.Data {
 	case "stat:piastry":
 		sortOptions = options.Find().SetSort(bson.D{{Key: "piastry", Value: -1}})
-		header = "Имя | Ранг | Команда | Пиастры\n"
+		header = "Имя | Ранг | Команда | Пиастры\n \n"
 		statType = "piastry"
 	case "stat:oblomki":
 		sortOptions = options.Find().SetSort(bson.D{{Key: "oblomki", Value: -1}})
-		header = "Имя | Ранг | Команда | Обломки\n"
+		header = "Имя | Ранг | Команда | Обломки\n \n"
 		statType = "oblomki"
 	case "stat:both":
 		sortOptions = options.Find().SetSort(bson.D{{Key: "name", Value: 1}})
-		header = "Имя | Ранг | Команда | Обломки | Пиастры\n"
+		header = "Имя | Ранг | Команда | Обломки | Пиастры\n \n"
 		statType = "both"
 	default:
 		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Неверный выбор статистики."))
