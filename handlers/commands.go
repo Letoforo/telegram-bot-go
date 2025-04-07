@@ -18,15 +18,24 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-var userCollection *mongo.Collection
-var logsCollection *mongo.Collection
+// Глобальные переменные для доступа к базе и коллекциям.
+var (
+	DB             *mongo.Database
+	userCollection *mongo.Collection
+	logsCollection *mongo.Collection
+)
 
-// InitHandlers инициализирует коллекции пользователей и логов.
-func InitHandlers(db *mongo.Database) {
-	userCollection = db.Collection("users")
-	logsCollection = db.Collection("logs")
+// InitHandlers объединяет функциональность: сохраняет указатель на базу данных,
+// инициализирует коллекции (users и logs), создает TTL-индекс для логов и выводит сообщение об инициализации.
+func InitHandlers(database *mongo.Database) {
+	// Сохраняем базу данных в глобальной переменной.
+	DB = database
 
-	// Создаем TTL-индекс для логов (удаление документов старше 30 дней).
+	// Инициализируем коллекции.
+	userCollection = database.Collection("users")
+	logsCollection = database.Collection("logs")
+
+	// Создаем TTL-индекс для логов (удаление документов старше 30 дней = 2592000 секунд).
 	indexModel := mongo.IndexModel{
 		Keys:    bson.M{"date": 1},
 		Options: options.Index().SetExpireAfterSeconds(2592000),
@@ -35,6 +44,8 @@ func InitHandlers(db *mongo.Database) {
 	if err != nil {
 		log.Printf("Ошибка создания TTL индекса для логов: %v", err)
 	}
+
+	fmt.Println("Handlers инициализированы: база данных установлена, коллекции users и logs инициализированы.")
 }
 
 // AddLogEvent записывает событие изменения ресурса (при добавлении или передаче) в коллекцию логов.
@@ -359,54 +370,18 @@ func handleDeleteProfile(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 // Формат команды:
 //
 //	начатьивент Название ивента, число для обломков, число для пиастр
-func HandleCreateEvent(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
-	// Удаляем префикс и обрезаем пробелы
-	argsStr := strings.TrimSpace(strings.TrimPrefix(message.Text, "начатьивент"))
-	parts := strings.Split(argsStr, ",")
-	if len(parts) < 3 {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Неверный формат команды.\nИспользуйте: начатьивент (Имя ивента), (число для обломков), (число для пиастр)")
-		bot.Send(msg)
-		return
-	}
-
-	eventName := strings.TrimSpace(parts[0])
-	oblomki, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err != nil {
-		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Ошибка: число для обломков указано неверно."))
-		return
-	}
-	piastry, err := strconv.Atoi(strings.TrimSpace(parts[2]))
-	if err != nil {
-		bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Ошибка: число для пиастр указано неверно."))
-		return
-	}
-
-	// Создаём объект активного ивента
-	currentEvent = &EventDetails{
-		Name:      eventName,
-		Oblomki:   oblomki,
-		Piastry:   piastry,
-		StartDate: time.Now(),
-	}
-
-	eventMessage := fmt.Sprintf("Ивент %s Запущен!\nУчастникам, принявшим ивент, будет зачислено:\nОбломков: %d\nПиастр: %d\nДата начала: %s",
-		currentEvent.Name, currentEvent.Oblomki, currentEvent.Piastry, currentEvent.StartDate.Format("02.01.2006 15:04"))
-
-	// Создаём инлайн-клавиатуру с двумя кнопками.
-	participateButton := tgbotapi.NewInlineKeyboardButtonData("Участвую", "event:participate")
-	skipButton := tgbotapi.NewInlineKeyboardButtonData("Пропуск", "event:skip")
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(participateButton, skipButton))
-
-	msg := tgbotapi.NewMessage(message.Chat.ID, eventMessage)
-	msg.ReplyMarkup = keyboard
-	bot.Send(msg)
-}
 
 // HandleCallbackQuery обрабатывает callback-запросы (например, для статистики и подтверждения удаления анкеты).
 func HandleCallbackQuery(bot *tgbotapi.BotAPI, cq *tgbotapi.CallbackQuery) {
 	// Отвечаем на callback-запрос, чтобы кнопки перестали мигать.
 	ack := tgbotapi.NewCallback(cq.ID, "")
 	bot.Request(ack)
+
+	// Если запрос относится к ивенту, вызываем отдельный обработчик и завершаем работу.
+	if strings.HasPrefix(cq.Data, "event:") {
+		HandleEventCallback(bot, cq)
+		return
+	}
 
 	// Если это ответ на удаление анкеты.
 	if strings.HasPrefix(cq.Data, "deleteprofile:") {

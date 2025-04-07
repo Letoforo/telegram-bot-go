@@ -12,7 +12,7 @@ import (
 
 func main() {
 	// Токен бота (в продакшене рекомендуется использовать переменные окружения)
-	token := "7547569544:AAESC3ecIyRx4ysVUmy5YiLkfaUpHmqJYoM"
+	token := "7547569544:AAHzaDCxeEqJCuEjWKwjAzXG_Q8ZTWjbQsk"
 
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
@@ -26,7 +26,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Ошибка подключения к MongoDB: %v", err)
 	}
+	// Получаем базу данных
 	database := mongoClient.Database("mydatabase")
+	if database == nil {
+		log.Fatal("Ошибка: База данных равна nil")
+	}
+	// Инициализируем обработчики, передав ссылку на базу данных
 	handlers.InitHandlers(database)
 
 	u := tgbotapi.NewUpdate(0)
@@ -43,7 +48,7 @@ func main() {
 			continue
 		}
 
-		// Если сообщение начинается со слэша, удаляем его и, если присутствует, упоминание бота.
+		// Если сообщение начинается со слэша, убираем слэш и упоминание бота.
 		if strings.HasPrefix(update.Message.Text, "/") {
 			cmd := strings.TrimPrefix(update.Message.Text, "/")
 			if i := strings.Index(cmd, "@"); i != -1 {
@@ -51,19 +56,18 @@ func main() {
 			}
 			update.Message.Text = cmd
 
-			// Если команда относится к админ-функциям, вызываем HandleAdminCommand,
-			// иначе – обычный обработчик.
+			// Приводим команду к нижнему регистру для унифицированной обработки.
 			lowerCmd := strings.ToLower(cmd)
-			if lowerCmd == "живой" ||
+			if strings.HasPrefix(lowerCmd, "начатьивент") {
+				handlers.HandleCreateEvent(bot, update.Message)
+			} else if lowerCmd == "живой" ||
 				lowerCmd == "список анкет" ||
 				lowerCmd == "полный список анкет" ||
 				strings.HasPrefix(lowerCmd, "анкета ") ||
 				strings.HasPrefix(lowerCmd, "датьадмин") ||
-				strings.HasPrefix(lowerCmd, "чек лог") ||
-				strings.HasPrefix(lowerCmd, "начатьивент") {
+				strings.HasPrefix(lowerCmd, "чек лог") {
 				handlers.HandleAdminCommand(bot, update.Message)
 			} else {
-				// Обработка обычных команд
 				handlers.HandleCommand(bot, update.Message)
 			}
 		} else {
