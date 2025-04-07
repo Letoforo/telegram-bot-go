@@ -76,73 +76,73 @@ func HandleCreateEvent(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	bot.Send(msg)
 }
 
-// HandleEventCallback обрабатывает callback-запросы для кнопок ивента.
 func HandleEventCallback(bot *tgbotapi.BotAPI, cq *tgbotapi.CallbackQuery) {
 	// Отправляем ответ на callback-запрос, чтобы кнопка перестала мигать.
 	ack := tgbotapi.NewCallback(cq.ID, "")
 	_, _ = bot.Request(ack)
 
-	// Проверяем, что глобальная переменная DB инициализирована.
-	if DB == nil {
-		answer := tgbotapi.NewCallback(cq.ID, "Ошибка сервера: база данных не инициализирована.")
-		_, _ = bot.Request(answer)
-		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Ошибка сервера: база данных не инициализирована."))
-		return
-	}
-
 	// Проверяем, что активный ивент установлен.
 	if currentEvent == nil {
-		answer := tgbotapi.NewCallback(cq.ID, "Нет активного ивента.")
-		_, _ = bot.Request(answer)
 		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Нет активного ивента."))
 		return
 	}
 
-	switch cq.Data {
-	case "event:participate":
-		usersColl := DB.Collection("users")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	// Создаем контекст с timeout для операций с базой.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-		var user models.UserProfile
-		err := usersColl.FindOne(ctx, bson.M{"telegram_id": int64(cq.From.ID)}).Decode(&user)
+	// Формируем фильтр для поиска пользователя по Telegram ID.
+	filter := bson.M{"telegram_id": int64(cq.From.ID)}
+
+	// Объявляем переменную для хранения профиля.
+	var profile models.UserProfile
+
+	// Сначала пробуем получить профиль из базы.
+	err := userCollection.FindOne(ctx, filter).Decode(&profile)
+	if err != nil {
+		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID,
+			"Анкета не найдена. Зарегистрируйтесь командой: регистрация"))
+		return
+	}
+
+	if cq.Data == "event:participate" {
+		// Опция «Участвую»: обновляем баланс валют пользователя.
+		newPiastry := profile.Piastry + currentEvent.Piastry
+		newOblomki := profile.Oblomki + currentEvent.Oblomki
+
+		update := bson.M{"$set": bson.M{"piastry": newPiastry, "oblomki": newOblomki}}
+		_, err = userCollection.UpdateOne(ctx, filter, update)
 		if err != nil {
-			answer := tgbotapi.NewCallback(cq.ID, "Профиль не найден. Зарегистрируйтесь, пожалуйста.")
-			_, _ = bot.Request(answer)
-			bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Профиль не найден. Зарегистрируйтесь, пожалуйста."))
-			return
-		}
-
-		newPiastry := user.Piastry + currentEvent.Piastry
-		newOblomki := user.Oblomki + currentEvent.Oblomki
-
-		update := bson.M{
-			"$set": bson.M{
-				"piastry": newPiastry,
-				"oblomki": newOblomki,
-			},
-		}
-
-		_, err = usersColl.UpdateOne(ctx, bson.M{"telegram_id": int64(cq.From.ID)}, update)
-		if err != nil {
-			answer := tgbotapi.NewCallback(cq.ID, "Ошибка обновления профиля.")
-			_, _ = bot.Request(answer)
 			bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Ошибка обновления профиля."))
 			return
 		}
-
-		answer := tgbotapi.NewCallback(cq.ID, "Успешно! Валюта зачислена в ваш профиль.")
-		_, _ = bot.Request(answer)
-		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Успешно! Валюта зачислена в ваш профиль."))
-
-	case "event:skip":
-		answer := tgbotapi.NewCallback(cq.ID, "Вы отказались от участия в ивенте.")
-		_, _ = bot.Request(answer)
-		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Вы отказались от участия в ивенте."))
-
-	default:
-		answer := tgbotapi.NewCallback(cq.ID, "Неверный выбор.")
-		_, _ = bot.Request(answer)
+		// Считываем обновленный профиль.
+		err = userCollection.FindOne(ctx, filter).Decode(&profile)
+		if err != nil {
+			bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Ошибка получения обновленных данных профиля."))
+			return
+		}
+		// Формируем строку с данными анкеты и информацией об ивенте.
+		caption := fmt.Sprintf(
+			"Имя: %s\nРаса: %s\nВозраст: %s\nРост и вес: %s\nПол: %s\nРанг: %s\nКоманда: %s\nОбломки: %d\nПиастры: %d\nИнвентарь: %s\n\nДата ивента: %s\nСтатус: Участвует",
+			profile.Name, profile.Race, profile.Age, profile.HeightWeight,
+			profile.Gender, profile.Rank, profile.Team, profile.Oblomki,
+			profile.Piastry, profile.Inventory, currentEvent.StartDate.Format("02.01.2006 15:04"))
+		// Отправляем фото с подписью.
+		photoMsg := tgbotapi.NewPhoto(cq.Message.Chat.ID, tgbotapi.FileID(profile.PhotoFileID))
+		photoMsg.Caption = caption
+		bot.Send(photoMsg)
+	} else if cq.Data == "event:skip" {
+		// Опция «Пропуск»: баланс не обновляем, выводим статус пропуска.
+		caption := fmt.Sprintf(
+			"Имя: %s\nРаса: %s\nВозраст: %s\nРост и вес: %s\nПол: %s\nРанг: %s\nКоманда: %s\nОбломки: %d\nПиастры: %d\nИнвентарь: %s\n\nДата ивента: %s\nСтатус: Пропускает ивент",
+			profile.Name, profile.Race, profile.Age, profile.HeightWeight,
+			profile.Gender, profile.Rank, profile.Team, profile.Oblomki,
+			profile.Piastry, profile.Inventory, currentEvent.StartDate.Format("02.01.2006 15:04"))
+		photoMsg := tgbotapi.NewPhoto(cq.Message.Chat.ID, tgbotapi.FileID(profile.PhotoFileID))
+		photoMsg.Caption = caption
+		bot.Send(photoMsg)
+	} else {
 		bot.Send(tgbotapi.NewMessage(cq.Message.Chat.ID, "Неверный выбор."))
 	}
 }
